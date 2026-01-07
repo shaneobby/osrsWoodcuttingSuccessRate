@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Woodcutting Success Rate Graph</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+        }
+        h2 {
+            text-align: center;
+            color: #bb86fc;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        label {
+            margin-right: 5px;
+        }
+        select, button {
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid #333;
+            font-size: 14px;
+            background-color: #1f1f1f;
+            color: #e0e0e0;
+        }
+        button {
+            background-color: #6200ee;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #3700b3;
+        }
+        canvas {
+            background-color: #1e1e1e;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h2>Woodcutting Success Rate Calculator</h2>
+
+    <div class="controls">
+        <div>
+            <label for="tree">Tree:</label>
+            <select id="tree">
+                <option>Normal</option>
+                <option>Oak</option>
+                <option>Willow</option>
+                <option>Maple</option>
+                <option>Yew</option>
+            </select>
+        </div>
+        <div>
+            <label for="tickrate">Tick Rate:</label>
+            <select id="tickrate">
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+            </select>
+        </div>
+        <div>
+            <label for="axes">Axes:</label>
+            <select id="axes" multiple size="5">
+                <option>Bronze</option>
+                <option>Iron</option>
+                <option>Steel</option>
+                <option>Black</option>
+                <option>Mithril</option>
+                <option>Adamant</option>
+                <option>Rune</option>
+                <option>Dragon</option>
+            </select>
+        </div>
+        <div>
+            <button onclick="drawGraph()">Calculate</button>
+        </div>
+    </div>
+
+    <canvas id="logsChart" width="800" height="400"></canvas>
+
+    <script>
+    const cutChances = {
+        Normal: { Bronze: [64,200], Iron: [96,300], Steel: [128,400], Black: [144,450], Mithril: [160,500], Adamant: [192,600], Rune: [224,700], Dragon: [240,750]},
+        Oak: { Bronze: [32,100], Iron: [48,150], Steel: [64,200], Black: [72,225], Mithril: [80,250], Adamant: [96,300], Rune: [112,350], Dragon: [120,375] },
+        Willow: { Bronze: [16,50], Iron: [24,75], Steel: [32,100], Black: [36,112], Mithril: [40,125], Adamant: [48,150], Rune: [56,175], Dragon: [60,187] },
+        Maple: { Bronze: [8,25], Iron: [12,37], Steel: [16,50], Black: [18,56], Mithril: [20,62], Adamant: [24,75], Rune: [28,87], Dragon: [30,93] },
+        Yew: { Bronze: [4,12], Iron: [6,19], Steel: [8,25], Black: [9,28], Mithril: [10,31], Adamant: [12,37], Rune: [14,44], Dragon: [15,47] }
+    };
+
+    const expPerLog = {Normal: 25, Oak: 37.5, Willow: 67.5, Maple: 100, Yew: 175};
+
+    function successChance(level, low, high) {
+        const chance = Math.floor(low * (99 - level)/98 + high * (level - 1)/98 + 0.5);
+        return Math.min(Math.max(chance/256, 0), 1);
+    }
+
+    function logsPerHour(level, low, high, tickrate) {
+        return (6000 / tickrate) * successChance(level, low, high);
+    }
+
+    let chart;
+
+    function drawGraph() {
+        const tree = document.getElementById('tree').value;
+        const tickrate = parseInt(document.getElementById('tickrate').value);
+        const axesSelect = document.getElementById('axes');
+        const selectedAxes = Array.from(axesSelect.selectedOptions).map(opt => opt.value);
+
+        const labels = Array.from({length: 99}, (_, i) => i + 1);
+
+        const datasets = selectedAxes.map((axe, index) => {
+            if(!cutChances[tree] || !cutChances[tree][axe]) {
+                console.warn(`Skipping invalid selection: tree='${tree}', axe='${axe}'`);
+                return null;
+            }
+            const [low, high] = cutChances[tree][axe];
+            let firstNodeAdded = false;
+            const data = labels.map(level => {
+                const y = successChance(level, low, high);
+                if((y <= 0 || y >= 1) && firstNodeAdded) return null;
+                if(!firstNodeAdded && (y <= 0 || y >= 1)) {
+                    firstNodeAdded = true;
+                    return { level: level, y: y, logs: logsPerHour(level, low, high, tickrate) };
+                }
+                firstNodeAdded = true;
+                return { level: level, y: y, logs: logsPerHour(level, low, high, tickrate) };
+            }).filter(pt => pt !== null);
+
+            const color = `hsl(${index * 60 % 360}, 70%, 50%)`;
+            return {
+                label: `${axe} axe`,
+                data: data,
+                parsing: { xAxisKey: 'level', yAxisKey: 'y' },
+                borderColor: color,
+                backgroundColor: `${color}33`,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                spanGaps: false
+            };
+        }).filter(ds => ds !== null);
+
+        if(datasets.length === 0) {
+            alert('No valid axe selections for the chosen tree.');
+            return;
+        }
+
+        const ctx = document.getElementById('logsChart').getContext('2d');
+        if(chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 15, padding: 15, color: '#e0e0e0' } },
+                    tooltip: {
+                        mode: 'nearest',
+                        intersect: true,
+                        backgroundColor: '#333',
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        callbacks: {
+                            label: function(context) {
+                                const point = context.raw;
+                                return `${context.dataset.label}: Success Rate: ${(point.y*100).toFixed(1)}%, Logs/hr: ${Math.round(point.logs)}, XP/hr: ${Math.round(point.logs * expPerLog[tree])}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { title: { display: true, text: 'Woodcutting Level', color: '#e0e0e0' }, grid: { color: '#333' }, ticks: { color: '#e0e0e0' } },
+                    y: { title: { display: true, text: 'Success Rate', color: '#e0e0e0' }, ticks: { callback: v => (v*100).toFixed(0) + '%', color: '#e0e0e0' }, grid: { color: '#333' } }
+                }
+            }
+        });
+    }
+    </script>
+</body>
+</html>
